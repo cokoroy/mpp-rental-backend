@@ -46,3 +46,6 @@ logs/
 Thumbs.db
 
 src/main/resources/application.properties
+
+mpp-rental-frontend/
+
