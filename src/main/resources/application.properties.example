@@ -5,9 +5,9 @@ spring.application.name=mpp-rental-backend
 server.port=8080
 
 # Database Configuration
-spring.datasource.url=jdbc:mysql://localhost:3306/mpp_rental_system?createDatabaseIfNotExist=true&useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC
+spring.datasource.url=jdbc:mysql://yamanote.proxy.rlwy.net:48325/railway?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC
 spring.datasource.username=root
-spring.datasource.password=YOUR_DB_PASSWORD
+spring.datasource.password=IfXucvNMRzUnNUgiHyzEUMHIQlIizpoE
 spring.datasource.driver-class-name=com.mysql.cj.jdbc.Driver
 
 # JPA Configuration
@@ -17,7 +17,7 @@ spring.jpa.properties.hibernate.format_sql=true
 spring.jpa.properties.hibernate.dialect=org.hibernate.dialect.MySQLDialect
 
 # JWT Configuration
-jwt.secret=YOUR_JWT_SECRET
+jwt.secret=404E635266556A586E3272357538782F413F4428472B4B6250645367566B5970
 jwt.expiration=86400000
 jwt.expiration.remember=604800000
 

@@ -90,7 +90,8 @@ public class SecurityConfig {
         // Allow requests from React frontend (adjust port if needed)
         configuration.setAllowedOrigins(Arrays.asList(
                 "http://localhost:5173",  // Vite default port
-                "http://localhost:3000"   // Alternative React port
+                "http://localhost:3000",   // Alternative React port
+                "https://mpp-rental-frontend.vercel.app"
         ));
 
         // Allow these HTTP methods
