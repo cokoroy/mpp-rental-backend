@@ -91,7 +91,8 @@ public class SecurityConfig {
         configuration.setAllowedOrigins(Arrays.asList(
                 "http://localhost:5173",  // Vite default port
                 "http://localhost:3000",   // Alternative React port
-                "https://mpp-rental-frontend.vercel.app"
+                "https://mpp-rental-frontend.vercel.app",
+                "https://*.vercel.app"
         ));
 
         // Allow these HTTP methods
