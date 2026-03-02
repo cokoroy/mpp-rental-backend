@@ -9,6 +9,11 @@ import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.multipart.MaxUploadSizeExceededException;
+import com.mpp.rental.exception.SupportTicketException;
+
+
+
+
 
 import java.util.HashMap;
 import java.util.Map;
@@ -79,5 +84,13 @@ public class GlobalExceptionHandler {
         ex.printStackTrace();
         return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
                 .body(ApiResponse.error("An error occurred: " + ex.getMessage()));
+    }
+
+
+    //support ticket exception
+    @ExceptionHandler(SupportTicketException.class)
+    public ResponseEntity<ApiResponse<Void>> handleSupportTicketException(SupportTicketException ex) {
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                .body(ApiResponse.error(ex.getMessage()));
     }
 }
