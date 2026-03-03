@@ -109,4 +109,17 @@ public interface FacilityApplicationRepository extends JpaRepository<FacilityApp
             "WHERE b.user.userId = :userId " +
             "AND fa.applicationStatus = 'PENDING'")
     List<FacilityApplication> findPendingByUserId(@Param("userId") Long userId);
+
+    /**
+     * Load ALL applications with all needed associations eagerly for report generation.
+     * Uses JOIN FETCH to avoid N+1 queries — same pattern as findAllByEventIdWithDetails.
+     */
+    @Query("SELECT fa FROM FacilityApplication fa " +
+            "JOIN FETCH fa.business b " +
+            "JOIN FETCH b.user u " +
+            "JOIN FETCH fa.eventFacility ef " +
+            "JOIN FETCH ef.event e " +
+            "JOIN FETCH ef.facility f " +
+            "ORDER BY fa.applicationCreatedAt DESC")
+    List<FacilityApplication> findAllForReport();
 }

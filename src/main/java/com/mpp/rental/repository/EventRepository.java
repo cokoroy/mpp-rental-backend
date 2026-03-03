@@ -41,9 +41,8 @@ public interface EventRepository extends JpaRepository<Event, Integer>, JpaSpeci
     /**
      * Find events that need status update (upcoming -> active, active -> completed)
      */
-    @Query("SELECT e FROM Event e WHERE e.deletedAt IS NULL AND e.eventStatus != 'cancelled' " +
-           "AND ((e.eventStatus = 'upcoming' AND e.eventStartDate <= :today) " +
-           "OR (e.eventStatus = 'active' AND e.eventEndDate < :today))")
+    @Query("SELECT e FROM Event e WHERE e.deletedAt IS NULL " +
+            "AND (e.eventStatus = 'upcoming' OR e.eventStatus = 'active')")
     List<Event> findEventsNeedingStatusUpdate(@Param("today") LocalDate today);
 
     /**

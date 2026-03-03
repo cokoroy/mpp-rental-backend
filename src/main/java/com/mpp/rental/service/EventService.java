@@ -427,19 +427,33 @@ public class EventService {
 
     /**
      * Scheduled task to auto-update event statuses
-     * Runs every day at midnight
+     * Runs every hour
      */
-    @Scheduled(cron = "0 0 0 * * *")
+    @Scheduled(cron = "0 0 * * * *")
     @Transactional
     public void autoUpdateEventStatuses() {
         LocalDate today = LocalDate.now();
         List<Event> events = eventRepository.findEventsNeedingStatusUpdate(today);
 
+        System.out.println("🔄 [TEST] Scheduled task at " + LocalDateTime.now() +
+                " - Found " + events.size() + " event(s) to check");
+
+        int updated = 0;
         for (Event event : events) {
+            String oldStatus = event.getEventStatus();
             event.updateStatusBasedOnDates();
+            String newStatus = event.getEventStatus();
+
+            if (!oldStatus.equals(newStatus)) {
+                System.out.println("   ✅ Updated: " + event.getEventName() +
+                        " (" + oldStatus + " → " + newStatus + ")");
+                updated++;
+            }
         }
 
         eventRepository.saveAll(events);
+
+        System.out.println("✅ [TEST] Completed - Updated " + updated + " event(s)");
     }
 
     /**

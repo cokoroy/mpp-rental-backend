@@ -95,25 +95,26 @@ public class Event {
     }
 
     /**
-     * Update event status based on current date
+     * Update event status based on BOTH date AND time
      */
     public void updateStatusBasedOnDates() {
-        // Check if status is null (safety check)
         if (this.eventStatus == null) {
             this.eventStatus = "upcoming";
         }
 
-        // Don't change status if already cancelled
         if ("cancelled".equals(this.eventStatus)) {
             return;
         }
 
-        LocalDate today = LocalDate.now();
+        // Use LocalDateTime (includes time!)
+        LocalDateTime now = LocalDateTime.now();
+        LocalDateTime eventStart = LocalDateTime.of(this.eventStartDate, this.eventStartTime);
+        LocalDateTime eventEnd = LocalDateTime.of(this.eventEndDate, this.eventEndTime);
 
-        if (today.isBefore(this.eventStartDate)) {
+        if (now.isBefore(eventStart)) {
             this.eventStatus = "upcoming";
-        } else if (today.isAfter(this.eventEndDate)) {
-            this.eventStatus = "completed";
+        } else if (now.isAfter(eventEnd)) {
+            this.eventStatus = "completed";  // ← Now checks time too!
         } else {
             this.eventStatus = "active";
         }
