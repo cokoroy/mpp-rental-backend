@@ -82,7 +82,7 @@ public class EventService {
     /**
      * Get all events with search and filters
      */
-    @Transactional(readOnly = true)
+    @Transactional
     public List<EventResponse> getAllEvents(EventSearchFilterRequest filter) {
         Specification<Event> spec = (root, query, criteriaBuilder) -> {
             List<Predicate> predicates = new ArrayList<>();
@@ -136,7 +136,7 @@ public class EventService {
     /**
      * Get event by ID
      */
-    @Transactional(readOnly = true)
+    @Transactional
     public EventResponse getEventById(Integer eventId) {
         Event event = eventRepository.findByEventIdAndDeletedAtIsNull(eventId)
                 .orElseThrow(() -> new EventNotFoundException(eventId));
@@ -151,7 +151,7 @@ public class EventService {
     /**
      * Get event with assigned facilities
      */
-    @Transactional(readOnly = true)
+    @Transactional
     public EventWithFacilitiesResponse getEventWithFacilities(Integer eventId) {
         Event event = eventRepository.findByEventIdAndDeletedAtIsNull(eventId)
                 .orElseThrow(() -> new EventNotFoundException(eventId));
