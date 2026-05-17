@@ -47,5 +47,7 @@ Thumbs.db
 
 src/main/resources/application.properties
 
+src/main/resources/firebase-service-account.json
+
 mpp-rental-frontend/
 
