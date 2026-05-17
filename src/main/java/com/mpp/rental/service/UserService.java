@@ -1,6 +1,7 @@
 package com.mpp.rental.service;
 
 import com.mpp.rental.dto.*;
+import com.mpp.rental.model.User.UserCategory;
 import com.mpp.rental.exception.BadRequestException;
 import com.mpp.rental.exception.ResourceNotFoundException;
 import com.mpp.rental.model.BankAccount;
@@ -45,6 +46,13 @@ public class UserService {
     /**
      * Register new user
      */
+    /**
+     * Check if email already exists — used by AuthController before sending OTP
+     */
+    public boolean emailExists(String email) {
+        return userRepository.existsByUserEmail(email);
+    }
+
     public UserProfileResponse registerUser(RegisterRequest request) {
         // 1. Validate passwords match
         if (!request.getUserPassword().equals(request.getConfirmPassword())) {
@@ -68,14 +76,19 @@ public class UserService {
         user.setUserPhoneNumber(request.getUserPhoneNumber());
         user.setUserPassword(passwordEncoder.encode(request.getUserPassword())); // Hash password
         user.setUserCategory(request.getUserCategory());
-        user.setUserAddress(request.getUserAddress());
+        user.setUserAddressLine1(request.getUserAddressLine1());
+        user.setUserAddressLine2(request.getUserAddressLine2());
+        user.setUserCity(request.getUserCity());
+        user.setUserPostalCode(request.getUserPostalCode());
+        user.setUserState(request.getUserState());
 
-        // Set initial status based on user category
-        if (request.getUserCategory() == UserCategory.MPP) {
-            user.setUserStatus(UserStatus.PENDING); // MPP needs approval
-        } else {
-            user.setUserStatus(UserStatus.ACTIVE); // Business owners are auto-approved
+        // Set initial status — STUDENT/NON_STUDENT auto-active
+        // MPP is created only by Super Admin (not through register)
+        if (request.getUserCategory() == UserCategory.MPP ||
+                request.getUserCategory() == UserCategory.SUPER_ADMIN) {
+            throw new BadRequestException("Invalid user category for registration.");
         }
+        user.setUserStatus(UserStatus.ACTIVE);
 
         user.setEmailVerified(false);
         user.setVerificationToken(UUID.randomUUID().toString()); // Generate verification token
@@ -185,8 +198,20 @@ public class UserService {
             user.setUserPhoneNumber(request.getUserPhoneNumber());
         }
 
-        if (request.getUserAddress() != null && !request.getUserAddress().isBlank()) {
-            user.setUserAddress(request.getUserAddress());
+        if (request.getUserAddressLine1() != null && !request.getUserAddressLine1().isBlank()) {
+            user.setUserAddressLine1(request.getUserAddressLine1());
+        }
+        if (request.getUserAddressLine2() != null) {
+            user.setUserAddressLine2(request.getUserAddressLine2());
+        }
+        if (request.getUserCity() != null && !request.getUserCity().isBlank()) {
+            user.setUserCity(request.getUserCity());
+        }
+        if (request.getUserPostalCode() != null && !request.getUserPostalCode().isBlank()) {
+            user.setUserPostalCode(request.getUserPostalCode());
+        }
+        if (request.getUserState() != null && !request.getUserState().isBlank()) {
+            user.setUserState(request.getUserState());
         }
 
         // Update bank account (if provided)
@@ -259,6 +284,8 @@ public class UserService {
                 .collect(Collectors.toList());
     }
 
+
+
     /**
      * Search and filter users (for MPP User Management)
      * @param searchQuery Search by name, email, or phone
@@ -310,7 +337,11 @@ public class UserService {
         user.setUserName(request.getUserName());
         user.setUserEmail(request.getUserEmail());
         user.setUserPhoneNumber(request.getUserPhoneNumber());
-        user.setUserAddress(request.getUserAddress());
+        user.setUserAddressLine1(request.getUserAddressLine1());
+        user.setUserAddressLine2(request.getUserAddressLine2());
+        user.setUserCity(request.getUserCity());
+        user.setUserPostalCode(request.getUserPostalCode());
+        user.setUserState(request.getUserState());
         user.setUserCategory(request.getUserCategory());
 
         // Update password if provided
@@ -366,6 +397,70 @@ public class UserService {
         return mapToUserDetailsResponse(updatedUser);
     }
 
+    // ==================== SUPER ADMIN: MPP MANAGEMENT ====================
+
+    /**
+     * Create a new MPP account (Super Admin only)
+     */
+    public UserProfileResponse createMppUser(CreateMppRequest request) {
+        if (userRepository.existsByUserEmail(request.getUserEmail())) {
+            throw new BadRequestException("Email already registered");
+        }
+        if (bankAccountRepository.existsByBankAccNumber(request.getBankAccNumber())) {
+            throw new BadRequestException("Bank account number already registered");
+        }
+
+        User user = new User();
+        user.setUserName(request.getUserName());
+        user.setUserEmail(request.getUserEmail());
+        user.setUserPhoneNumber(request.getUserPhoneNumber());
+        user.setUserPassword(passwordEncoder.encode(request.getUserPassword()));
+        user.setUserCategory(UserCategory.MPP);
+        user.setUserStatus(UserStatus.ACTIVE); // Super Admin creates active MPP accounts
+        user.setEmailVerified(true);           // Pre-verified, no OTP needed
+
+        BankAccount bankAccount = new BankAccount();
+        bankAccount.setBankName(request.getBankName());
+        bankAccount.setBankAccNumber(request.getBankAccNumber());
+        bankAccount.setUser(user);
+        user.setBankAccount(bankAccount);
+
+        User saved = userRepository.save(user);
+        return mapToUserProfileResponse(saved);
+    }
+
+    /**
+     * Get all MPP users (Super Admin only)
+     */
+    public List<UserManagementResponse> getMppUsers() {
+        List<User> users = userRepository.findAllWithBusinessesAndBankAccount();
+        return users.stream()
+                .filter(u -> u.getUserCategory() == UserCategory.MPP)
+                .map(this::mapToUserManagementResponse)
+                .collect(Collectors.toList());
+    }
+
+    /**
+     * Get ALL users including MPP and SUPER_ADMIN — for Super Admin stats
+     */
+//    public List<UserManagementResponse> getAllUsers() {
+//        return userRepository.findAllWithBusinessesAndBankAccount().stream()
+//                .map(this::mapToUserManagementResponse)
+//                .collect(Collectors.toList());
+//    }
+
+    /**
+     * Get all non-MPP, non-SuperAdmin users (MPP's view — excludes MPP and Super Admin)
+     */
+    public List<UserManagementResponse> getNonAdminUsers() {
+        List<User> users = userRepository.findAllWithBusinessesAndBankAccount();
+        return users.stream()
+                .filter(u -> u.getUserCategory() != UserCategory.MPP
+                        && u.getUserCategory() != UserCategory.SUPER_ADMIN)
+                .map(this::mapToUserManagementResponse)
+                .collect(Collectors.toList());
+    }
+
     // ==================== HELPER MAPPING METHODS ====================
 
     /**
@@ -379,7 +474,11 @@ public class UserService {
                 .userPhoneNumber(user.getUserPhoneNumber())
                 .userCategory(user.getUserCategory())
                 .userStatus(user.getUserStatus())
-                .userAddress(user.getUserAddress())
+                .userAddressLine1(user.getUserAddressLine1())
+                .userAddressLine2(user.getUserAddressLine2())
+                .userCity(user.getUserCity())
+                .userPostalCode(user.getUserPostalCode())
+                .userState(user.getUserState())
                 .userRegisteredAt(user.getUserRegisteredAt())
                 .userLastLogin(user.getUserLastLogin())
                 .emailVerified(user.getEmailVerified());
@@ -415,7 +514,11 @@ public class UserService {
                 .userPhoneNumber(user.getUserPhoneNumber())
                 .userCategory(user.getUserCategory())
                 .userStatus(user.getUserStatus())
-                .userAddress(user.getUserAddress())
+                .userAddressLine1(user.getUserAddressLine1())
+                .userAddressLine2(user.getUserAddressLine2())
+                .userCity(user.getUserCity())
+                .userPostalCode(user.getUserPostalCode())
+                .userState(user.getUserState())
                 .userRegisteredAt(user.getUserRegisteredAt())
                 .userLastLogin(user.getUserLastLogin())
                 .businesses(businesses);
@@ -451,7 +554,11 @@ public class UserService {
                 .userName(user.getUserName())
                 .userEmail(user.getUserEmail())
                 .userPhoneNumber(user.getUserPhoneNumber())
-                .userAddress(user.getUserAddress())
+                .userAddressLine1(user.getUserAddressLine1())
+                .userAddressLine2(user.getUserAddressLine2())
+                .userCity(user.getUserCity())
+                .userPostalCode(user.getUserPostalCode())
+                .userState(user.getUserState())
                 .userPassword(user.getUserPassword()) // Include encrypted password (will be shown as-is to MPP)
                 .userCategory(user.getUserCategory())
                 .userStatus(user.getUserStatus())

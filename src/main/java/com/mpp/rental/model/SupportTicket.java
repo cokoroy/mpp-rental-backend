@@ -49,9 +49,6 @@ public class SupportTicket {
 
     /**
      * Ticket Status: OPEN, IN_PROGRESS, RESOLVED
-     * OPEN: newly created by Business Owner
-     * IN_PROGRESS: MPP has replied
-     * RESOLVED: MPP marked as resolved
      */
     @Enumerated(EnumType.STRING)
     @Column(name = "ticket_status", nullable = false, length = 50)
@@ -59,6 +56,20 @@ public class SupportTicket {
 
     @OneToMany(mappedBy = "supportTicket", cascade = CascadeType.ALL, orphanRemoval = true)
     private List<TicketResponse> responses;
+
+    /**
+     * Feedback — submitted by Business Owner after ticket is RESOLVED
+     * Rating: 1-5 stars (null = no feedback yet)
+     * Comment: optional written feedback
+     */
+    @Column(name = "feedback_rating")
+    private Integer feedbackRating;
+
+    @Column(name = "feedback_comment", length = 1000)
+    private String feedbackComment;
+
+    @Column(name = "feedback_submitted_at")
+    private LocalDateTime feedbackSubmittedAt;
 
     @CreationTimestamp
     @Column(name = "created_at", nullable = false, updatable = false)

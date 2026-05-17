@@ -109,7 +109,7 @@ public class UserController {
     @GetMapping("/mpp/all")
     @PreAuthorize("hasRole('MPP')") // Only MPP can access this endpoint
     public ResponseEntity<ApiResponse<List<UserManagementResponse>>> getAllUsers() {
-        List<UserManagementResponse> users = userService.getAllUsers();
+        List<UserManagementResponse> users = userService.getNonAdminUsers();
 
         return ResponseEntity
                 .ok(ApiResponse.success("Users retrieved successfully", users));
@@ -127,7 +127,11 @@ public class UserController {
             @RequestParam(required = false) UserCategory category,
             @RequestParam(required = false) UserStatus status) {
 
-        List<UserManagementResponse> users = userService.searchUsers(searchQuery, category, status);
+        List<UserManagementResponse> users = userService.searchUsers(searchQuery, category, status)
+                .stream()
+                .filter(u -> u.getUserCategory() != com.mpp.rental.model.User.UserCategory.MPP
+                        && u.getUserCategory() != com.mpp.rental.model.User.UserCategory.SUPER_ADMIN)
+                .collect(java.util.stream.Collectors.toList());
 
         return ResponseEntity
                 .ok(ApiResponse.success("Search completed successfully", users));
@@ -177,5 +181,90 @@ public class UserController {
 
         return ResponseEntity
                 .ok(ApiResponse.success(message, updatedUser));
+    }
+
+    // ==================== SUPER ADMIN ENDPOINTS ====================
+
+    /**
+     * Get ALL users including MPP and SUPER_ADMIN (Super Admin only)
+     * GET /api/users/superadmin/all
+     */
+    @GetMapping("/superadmin/all")
+    @PreAuthorize("hasRole('SUPER_ADMIN')")
+    public ResponseEntity<ApiResponse<List<UserManagementResponse>>> getAllUsersForSuperAdmin() {
+        try {
+            return ResponseEntity.ok(ApiResponse.success("All users retrieved", userService.getAllUsers()));
+        } catch (Exception e) {
+            return ResponseEntity.status(org.springframework.http.HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(ApiResponse.error(e.getMessage()));
+        }
+    }
+
+    /**
+     * Get all MPP users (Super Admin only)
+     * GET /api/users/superadmin/mpp
+     */
+    @GetMapping("/superadmin/mpp")
+    @PreAuthorize("hasRole('SUPER_ADMIN')")
+    public ResponseEntity<ApiResponse<List<UserManagementResponse>>> getMppUsers() {
+        try {
+            return ResponseEntity.ok(ApiResponse.success("MPP users retrieved", userService.getMppUsers()));
+        } catch (Exception e) {
+            return ResponseEntity.status(org.springframework.http.HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(ApiResponse.error(e.getMessage()));
+        }
+    }
+
+    /**
+     * Create new MPP account (Super Admin only)
+     * POST /api/users/superadmin/mpp
+     */
+    @PostMapping("/superadmin/mpp")
+    @PreAuthorize("hasRole('SUPER_ADMIN')")
+    public ResponseEntity<ApiResponse<UserProfileResponse>> createMppUser(
+            @Valid @RequestBody com.mpp.rental.dto.CreateMppRequest request) {
+        try {
+            UserProfileResponse created = userService.createMppUser(request);
+            return ResponseEntity.status(org.springframework.http.HttpStatus.CREATED)
+                    .body(ApiResponse.success("MPP account created successfully", created));
+        } catch (Exception e) {
+            return ResponseEntity.status(org.springframework.http.HttpStatus.BAD_REQUEST)
+                    .body(ApiResponse.error(e.getMessage()));
+        }
+    }
+
+    /**
+     * Toggle MPP user status (Super Admin only)
+     * PUT /api/users/superadmin/mpp/toggle-status/{userId}
+     */
+    @PutMapping("/superadmin/mpp/toggle-status/{userId}")
+    @PreAuthorize("hasRole('SUPER_ADMIN')")
+    public ResponseEntity<ApiResponse<UserDetailsResponse>> toggleMppStatus(@PathVariable Long userId) {
+        try {
+            UserDetailsResponse updated = userService.toggleUserStatus(userId);
+            String message = updated.getUserStatus() == com.mpp.rental.model.User.UserStatus.ACTIVE
+                    ? "MPP account activated" : "MPP account blocked";
+            return ResponseEntity.ok(ApiResponse.success(message, updated));
+        } catch (Exception e) {
+            return ResponseEntity.status(org.springframework.http.HttpStatus.BAD_REQUEST)
+                    .body(ApiResponse.error(e.getMessage()));
+        }
+    }
+
+    /**
+     * Update MPP account (Super Admin only)
+     * PUT /api/users/superadmin/mpp/{userId}
+     */
+    @PutMapping("/superadmin/mpp/{userId}")
+    @PreAuthorize("hasRole('SUPER_ADMIN')")
+    public ResponseEntity<ApiResponse<UserDetailsResponse>> updateMppUser(
+            @PathVariable Long userId,
+            @Valid @RequestBody UpdateUserByMPPRequest request) {
+        try {
+            return ResponseEntity.ok(ApiResponse.success("MPP account updated", userService.updateUserByMPP(userId, request)));
+        } catch (Exception e) {
+            return ResponseEntity.status(org.springframework.http.HttpStatus.BAD_REQUEST)
+                    .body(ApiResponse.error(e.getMessage()));
+        }
     }
 }

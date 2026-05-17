@@ -30,6 +30,11 @@ public class SupportTicketResponse {
     // Responses (null when listing, populated when viewing detail)
     private List<TicketResponseDto> responses;
 
+    // Feedback (null = no feedback submitted yet)
+    private Integer feedbackRating;
+    private String feedbackComment;
+    private LocalDateTime feedbackSubmittedAt;
+
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
 }

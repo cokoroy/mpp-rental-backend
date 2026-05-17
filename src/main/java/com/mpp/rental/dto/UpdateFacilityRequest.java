@@ -29,7 +29,7 @@ public class UpdateFacilityRequest {
     private String facilityDesc;
 
     @NotBlank(message = "Usage information is required")
-    @Size(min = 10, max = 1000, message = "Usage information must be between 10 and 1000 characters")
+    @Size(max = 1000, message = "Usage information must be between 10 and 1000 characters")
     private String usage;
 
     @Size(max = 500, message = "Remark must not exceed 500 characters")

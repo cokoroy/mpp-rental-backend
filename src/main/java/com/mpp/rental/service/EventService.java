@@ -19,6 +19,8 @@ import org.springframework.data.jpa.domain.Specification;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import lombok.extern.slf4j.Slf4j;
+
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
@@ -29,11 +31,13 @@ import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
+@Slf4j
 public class EventService {
 
     private final EventRepository eventRepository;
     private final EventFacilityRepository eventFacilityRepository;
     private final FacilityRepository facilityRepository;
+    private final NotificationService notificationService;
 
     /**
      * Create new event with facility assignments
@@ -72,6 +76,15 @@ public class EventService {
         // Save event
         Event savedEvent = eventRepository.save(event);
 
+        try {
+            notificationService.notifyEventCreated(
+                savedEvent.getEventId().longValue(),
+                savedEvent.getEventName()
+            );
+        } catch (Exception e) {
+            log.warn("Failed to send event creation notification: {}", e.getMessage());
+        }
+
         // Assign facilities
         List<EventFacility> assignedFacilities = assignFacilitiesToEvent(savedEvent, request.getFacilities());
 
@@ -105,15 +118,15 @@ public class EventService {
                 predicates.add(criteriaBuilder.equal(root.get("eventStatus"), filter.getEventStatus()));
             }
 
-            // Hide completed and cancelled events older than 1 month
-            LocalDate oneMonthAgo = LocalDate.now().minusMonths(1);
+            // Hide completed and cancelled events older than 7 days
+            LocalDate aWeekago = LocalDate.now().minusDays(7);
             Predicate notOldCompleted = criteriaBuilder.or(
                 criteriaBuilder.notEqual(root.get("eventStatus"), "completed"),
-                criteriaBuilder.greaterThanOrEqualTo(root.get("eventEndDate"), oneMonthAgo)
+                criteriaBuilder.greaterThanOrEqualTo(root.get("eventEndDate"), aWeekago)
             );
             Predicate notOldCancelled = criteriaBuilder.or(
                 criteriaBuilder.notEqual(root.get("eventStatus"), "cancelled"),
-                criteriaBuilder.greaterThanOrEqualTo(root.get("eventEndDate"), oneMonthAgo)
+                criteriaBuilder.greaterThanOrEqualTo(root.get("eventEndDate"), aWeekago)
             );
             predicates.add(criteriaBuilder.and(notOldCompleted, notOldCancelled));
 
@@ -309,11 +322,84 @@ public class EventService {
                 throw new BadRequestException("Cannot assign inactive facility: " + facility.getFacilityName());
             }
 
+            // Validate quantities and maxPerBusiness based on allocation mode
+            if (facilityRequest.getIsAllocatedByCategory()) {
+                // Mode 1: Allocated by category
+                int studentQty = facilityRequest.getQuantityStudent();
+                int nonStudentQty = facilityRequest.getQuantityNonStudent();
+
+                if (studentQty == 0 && nonStudentQty == 0) {
+                    throw new BadRequestException(
+                            "At least one of student or non-student quantity must be greater than 0 for facility: " +
+                                    facility.getFacilityName()
+                    );
+                }
+
+                // CORRECTED: Check maxPerBusiness against EACH category pool
+                int maxPerBusiness = facilityRequest.getMaxPerBusiness();
+
+                if (studentQty > 0 && maxPerBusiness > studentQty) {
+                    throw new BadRequestException(
+                            String.format(
+                                    "Max per business (%d) cannot exceed student quantity (%d) for facility: %s. " +
+                                            "Student businesses can only apply from the student pool.",
+                                    maxPerBusiness,
+                                    studentQty,
+                                    facility.getFacilityName()
+                            )
+                    );
+                }
+
+                if (nonStudentQty > 0 && maxPerBusiness > nonStudentQty) {
+                    throw new BadRequestException(
+                            String.format(
+                                    "Max per business (%d) cannot exceed non-student quantity (%d) for facility: %s. " +
+                                            "Non-student businesses can only apply from the non-student pool.",
+                                    maxPerBusiness,
+                                    nonStudentQty,
+                                    facility.getFacilityName()
+                            )
+                    );
+                }
+            } else {
+                // Mode 2: Open to all
+                if (facilityRequest.getTotalQuantity() == null || facilityRequest.getTotalQuantity() < 1) {
+                    throw new BadRequestException(
+                            "Total quantity must be at least 1 for facility: " + facility.getFacilityName()
+                    );
+                }
+
+                // For open-to-all, check against total quantity
+                if (facilityRequest.getMaxPerBusiness() > facilityRequest.getTotalQuantity()) {
+                    throw new BadRequestException(
+                            String.format(
+                                    "Max per business (%d) cannot exceed total quantity (%d) for facility: %s",
+                                    facilityRequest.getMaxPerBusiness(),
+                                    facilityRequest.getTotalQuantity(),
+                                    facility.getFacilityName()
+                            )
+                    );
+                }
+            }
+
             // Create EventFacility
             EventFacility eventFacility = new EventFacility();
             eventFacility.setEvent(event);
             eventFacility.setFacility(facility);
-            eventFacility.setQuantityFacilityAvailable(facilityRequest.getQuantity());
+            eventFacility.setIsAllocatedByCategory(facilityRequest.getIsAllocatedByCategory());
+
+            if (facilityRequest.getIsAllocatedByCategory()) {
+                // Mode 1: Set separate quantities
+                eventFacility.setQuantityStudentAvailable(facilityRequest.getQuantityStudent());
+                eventFacility.setQuantityNonStudentAvailable(facilityRequest.getQuantityNonStudent());
+                // Total will be calculated by @PrePersist
+            } else {
+                // Mode 2: Set total quantity directly
+                eventFacility.setQuantityFacilityAvailable(facilityRequest.getTotalQuantity());
+                eventFacility.setQuantityStudentAvailable(0);
+                eventFacility.setQuantityNonStudentAvailable(0);
+            }
+
             eventFacility.setMaxPerBusiness(facilityRequest.getMaxPerBusiness());
             eventFacility.setFacilityStudentPrice(facilityRequest.getStudentPrice());
             eventFacility.setFacilityNonStudentPrice(facilityRequest.getNonStudentPrice());
@@ -338,6 +424,68 @@ public class EventService {
 
         // Process each facility request
         for (AssignFacilityRequest request : facilityRequests) {
+            // Get facility for better error messages
+            Facility facility = facilityRepository.findByFacilityIdAndDeletedAtIsNull(request.getFacilityId())
+                    .orElse(null);
+            String facilityName = facility != null ? facility.getFacilityName() : "facility";
+
+            // Validate quantities and maxPerBusiness based on allocation mode
+            if (request.getIsAllocatedByCategory()) {
+                // Mode 1: Allocated by category
+                int studentQty = request.getQuantityStudent();
+                int nonStudentQty = request.getQuantityNonStudent();
+
+                if (studentQty == 0 && nonStudentQty == 0) {
+                    throw new BadRequestException(
+                            "At least one of student or non-student quantity must be greater than 0"
+                    );
+                }
+
+                // CORRECTED: Check maxPerBusiness against EACH category pool
+                int maxPerBusiness = request.getMaxPerBusiness();
+
+                if (studentQty > 0 && maxPerBusiness > studentQty) {
+                    throw new BadRequestException(
+                            String.format(
+                                    "Max per business (%d) cannot exceed student quantity (%d) for %s. " +
+                                            "Student businesses can only apply from the student pool.",
+                                    maxPerBusiness,
+                                    studentQty,
+                                    facilityName
+                            )
+                    );
+                }
+
+                if (nonStudentQty > 0 && maxPerBusiness > nonStudentQty) {
+                    throw new BadRequestException(
+                            String.format(
+                                    "Max per business (%d) cannot exceed non-student quantity (%d) for %s. " +
+                                            "Non-student businesses can only apply from the non-student pool.",
+                                    maxPerBusiness,
+                                    nonStudentQty,
+                                    facilityName
+                            )
+                    );
+                }
+            } else {
+                // Mode 2: Open to all
+                if (request.getTotalQuantity() == null || request.getTotalQuantity() < 1) {
+                    throw new BadRequestException("Total quantity must be at least 1");
+                }
+
+                // For open-to-all, check against total quantity
+                if (request.getMaxPerBusiness() > request.getTotalQuantity()) {
+                    throw new BadRequestException(
+                            String.format(
+                                    "Max per business (%d) cannot exceed total quantity (%d) for %s",
+                                    request.getMaxPerBusiness(),
+                                    request.getTotalQuantity(),
+                                    facilityName
+                            )
+                    );
+                }
+            }
+
             if (request.getEventFacilityId() != null) {
                 // Update existing facility
                 EventFacility existing = existingFacilities.stream()
@@ -345,15 +493,29 @@ public class EventService {
                         .findFirst()
                         .orElseThrow(() -> new EventFacilityException("Event facility not found: " + request.getEventFacilityId()));
 
-                existing.setQuantityFacilityAvailable(request.getQuantity());
+                existing.setIsAllocatedByCategory(request.getIsAllocatedByCategory());
+
+                if (request.getIsAllocatedByCategory()) {
+                    // Mode 1: Set separate quantities
+                    existing.setQuantityStudentAvailable(request.getQuantityStudent());
+                    existing.setQuantityNonStudentAvailable(request.getQuantityNonStudent());
+                    // Total will be calculated by @PreUpdate
+                } else {
+                    // Mode 2: Set total quantity directly
+                    existing.setQuantityFacilityAvailable(request.getTotalQuantity());
+                    existing.setQuantityStudentAvailable(0);
+                    existing.setQuantityNonStudentAvailable(0);
+                }
+
                 existing.setMaxPerBusiness(request.getMaxPerBusiness());
                 existing.setFacilityStudentPrice(request.getStudentPrice());
                 existing.setFacilityNonStudentPrice(request.getNonStudentPrice());
                 eventFacilityRepository.save(existing);
             } else {
                 // Add new facility
-                Facility facility = facilityRepository.findByFacilityIdAndDeletedAtIsNull(request.getFacilityId())
-                        .orElseThrow(() -> new BadRequestException("Facility not found with ID: " + request.getFacilityId()));
+                if (facility == null) {
+                    throw new BadRequestException("Facility not found with ID: " + request.getFacilityId());
+                }
 
                 if (!facility.getFacilityStatus().equals("active")) {
                     throw new BadRequestException("Cannot assign inactive facility: " + facility.getFacilityName());
@@ -365,7 +527,20 @@ public class EventService {
                 EventFacility newEventFacility = new EventFacility();
                 newEventFacility.setEvent(event);
                 newEventFacility.setFacility(facility);
-                newEventFacility.setQuantityFacilityAvailable(request.getQuantity());
+                newEventFacility.setIsAllocatedByCategory(request.getIsAllocatedByCategory());
+
+                if (request.getIsAllocatedByCategory()) {
+                    // Mode 1: Set separate quantities
+                    newEventFacility.setQuantityStudentAvailable(request.getQuantityStudent());
+                    newEventFacility.setQuantityNonStudentAvailable(request.getQuantityNonStudent());
+                    // Total will be calculated by @PrePersist
+                } else {
+                    // Mode 2: Set total quantity directly
+                    newEventFacility.setQuantityFacilityAvailable(request.getTotalQuantity());
+                    newEventFacility.setQuantityStudentAvailable(0);
+                    newEventFacility.setQuantityNonStudentAvailable(0);
+                }
+
                 newEventFacility.setMaxPerBusiness(request.getMaxPerBusiness());
                 newEventFacility.setFacilityStudentPrice(request.getStudentPrice());
                 newEventFacility.setFacilityNonStudentPrice(request.getNonStudentPrice());
@@ -384,8 +559,8 @@ public class EventService {
                 // Check if facility has applications
                 if (eventFacilityRepository.hasApplications(existing.getEventFacilityId())) {
                     throw new EventFacilityException(
-                        "Cannot remove facility '" + existing.getFacility().getFacilityName() + 
-                        "' because it has existing applications"
+                            "Cannot remove facility '" + existing.getFacility().getFacilityName() +
+                                    "' because it has existing applications"
                     );
                 }
                 eventFacilityRepository.delete(existing);
@@ -481,7 +656,7 @@ public class EventService {
      */
     private EventFacilityResponse mapToEventFacilityResponse(EventFacility eventFacility) {
         Facility facility = eventFacility.getFacility();
-        
+
         EventFacilityResponse response = new EventFacilityResponse();
         response.setEventFacilityId(eventFacility.getEventFacilityId());
         response.setEventId(eventFacility.getEvent().getEventId());
@@ -491,7 +666,20 @@ public class EventService {
         response.setFacilityType(facility.getFacilityType());
         response.setFacilityDesc(facility.getFacilityDesc());
         response.setFacilityUsage(facility.getFacility_usage());
+
+        // Allocation mode flag
+        response.setIsAllocatedByCategory(eventFacility.getIsAllocatedByCategory());
+
+        // Current (remaining) quantities
+        response.setQuantityStudentAvailable(eventFacility.getQuantityStudentAvailable());
+        response.setQuantityNonStudentAvailable(eventFacility.getQuantityNonStudentAvailable());
         response.setQuantityFacilityAvailable(eventFacility.getQuantityFacilityAvailable());
+
+        // NEW: Original quantities
+        response.setOriginalQuantityStudent(eventFacility.getOriginalQuantityStudent());
+        response.setOriginalQuantityNonStudent(eventFacility.getOriginalQuantityNonStudent());
+        response.setOriginalQuantityTotal(eventFacility.getOriginalQuantityTotal());
+
         response.setFacilityStudentPrice(eventFacility.getFacilityStudentPrice());
         response.setFacilityNonStudentPrice(eventFacility.getFacilityNonStudentPrice());
         response.setMaxPerBusiness(eventFacility.getMaxPerBusiness());

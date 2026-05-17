@@ -25,7 +25,13 @@ public class UserManagementResponse {
     private String userPhoneNumber;
     private User.UserCategory userCategory;
     private User.UserStatus userStatus;
-    private String userAddress;
+    // ── Split address fields ─────────────────────────────────────────────────
+    private String userAddressLine1;
+    private String userAddressLine2;
+    private String userCity;
+    private String userPostalCode;
+    private String userState;
+    // ─────────────────────────────────────────────────────────────────────────
     private LocalDateTime userRegisteredAt;
     private LocalDateTime userLastLogin;
 

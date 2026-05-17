@@ -19,7 +19,20 @@ public class EventFacilityResponse {
     private String facilityType;
     private String facilityDesc;
     private String facilityUsage;
+
+    // Allocation mode flag
+    private Boolean isAllocatedByCategory;
+
+    // CURRENT quantities (remaining/available)
+    private Integer quantityStudentAvailable;
+    private Integer quantityNonStudentAvailable;
     private Integer quantityFacilityAvailable;
+
+    // ORIGINAL quantities (initially allocated)
+    private Integer originalQuantityStudent;
+    private Integer originalQuantityNonStudent;
+    private Integer originalQuantityTotal;
+
     private BigDecimal facilityStudentPrice;
     private BigDecimal facilityNonStudentPrice;
     private Integer maxPerBusiness;

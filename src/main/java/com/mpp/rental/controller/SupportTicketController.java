@@ -127,6 +127,32 @@ public class SupportTicketController {
         }
     }
 
+
+    /**
+     * POST /api/bo/support/{ticketId}/feedback
+     * Business Owner submits star rating + comment on a resolved ticket
+     * Only allowed once per ticket
+     */
+    @PostMapping("/api/bo/support/{ticketId}/feedback")
+    @PreAuthorize("hasAnyRole('STUDENT', 'NON_STUDENT')")
+    public ResponseEntity<ApiResponse<SupportTicketResponse>> submitFeedback(
+            @PathVariable Integer ticketId,
+            @Valid @RequestBody SubmitFeedbackRequest request) {
+        try {
+            SupportTicketResponse response = supportTicketService.submitFeedback(ticketId, request);
+            return ResponseEntity.ok(ApiResponse.success("Feedback submitted successfully", response));
+        } catch (ResourceNotFoundException e) {
+            return ResponseEntity.status(HttpStatus.NOT_FOUND)
+                    .body(ApiResponse.error(e.getMessage()));
+        } catch (SupportTicketException e) {
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                    .body(ApiResponse.error(e.getMessage()));
+        } catch (Exception e) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(ApiResponse.error(e.getMessage()));
+        }
+    }
+
     // ==================== MPP ENDPOINTS ====================
 
     /**

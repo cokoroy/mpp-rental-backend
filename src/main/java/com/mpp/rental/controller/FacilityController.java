@@ -70,9 +70,9 @@ public class FacilityController {
                 return ResponseEntity.badRequest()
                         .body(new ApiResponse<>(false, "Facility description must be at least 10 characters", null));
             }
-            if (usage.isEmpty() || usage.length() < 10) {
+            if (usage.isEmpty()) {
                 return ResponseEntity.badRequest()
-                        .body(new ApiResponse<>(false, "Facility usage must be at least 10 characters", null));
+                        .body(new ApiResponse<>(false, "Facility usage is required", null));
             }
 
             // Create request object manually
@@ -169,9 +169,9 @@ public class FacilityController {
                 return ResponseEntity.badRequest()
                         .body(new ApiResponse<>(false, "Facility description must be at least 10 characters", null));
             }
-            if (usage.isEmpty() || usage.length() < 10) {
+            if (usage.isEmpty()) {
                 return ResponseEntity.badRequest()
-                        .body(new ApiResponse<>(false, "Facility usage must be at least 10 characters", null));
+                        .body(new ApiResponse<>(false, "Facility usage is required", null));
             }
 
             // Create request object manually

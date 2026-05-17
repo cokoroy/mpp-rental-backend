@@ -1,19 +1,12 @@
 package com.mpp.rental.dto;
 
 import com.mpp.rental.model.User;
-import jakarta.validation.constraints.Email;
-import jakarta.validation.constraints.NotBlank;
-import jakarta.validation.constraints.NotNull;
-import jakarta.validation.constraints.Size;
+import jakarta.validation.constraints.*;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
-/**
- * UpdateUserByMPPRequest - DTO for MPP to update user information
- * MPP can update ALL fields including role and password
- */
 @Data
 @Builder
 @NoArgsConstructor
@@ -33,13 +26,26 @@ public class UpdateUserByMPPRequest {
     @Size(max = 20, message = "Phone number cannot exceed 20 characters")
     private String userPhoneNumber;
 
-    @Size(max = 500, message = "Address cannot exceed 500 characters")
-    private String userAddress;
+    // ── Split address fields ──────────────────────────────────────────────────
+    @Size(max = 255, message = "Address line 1 cannot exceed 255 characters")
+    private String userAddressLine1;
+
+    @Size(max = 255, message = "Address line 2 cannot exceed 255 characters")
+    private String userAddressLine2;
+
+    @Size(max = 100, message = "City cannot exceed 100 characters")
+    private String userCity;
+
+    @Pattern(regexp = "^[0-9]{5}$", message = "Postal code must be 5 digits")
+    private String userPostalCode;
+
+    @Size(max = 100, message = "State cannot exceed 100 characters")
+    private String userState;
+    // ─────────────────────────────────────────────────────────────────────────
 
     @NotNull(message = "User category is required")
-    private User.UserCategory userCategory; // STUDENT or NON_STUDENT
+    private User.UserCategory userCategory;
 
-    // Bank Account Information
     @NotBlank(message = "Bank name is required")
     @Size(max = 100, message = "Bank name cannot exceed 100 characters")
     private String bankName;
@@ -48,13 +54,6 @@ public class UpdateUserByMPPRequest {
     @Size(max = 50, message = "Bank account number cannot exceed 50 characters")
     private String bankAccNumber;
 
-    // Password (optional - only update if provided)
     @Size(min = 6, message = "Password must be at least 6 characters")
-    private String userPassword; // If null or empty, don't update password
-
-    // Role (MPP can change user role)
-    // Note: In your current User model, there's no separate "role" field
-    // The role is determined by userCategory (MPP, STUDENT, NON_STUDENT)
-    // If you want to allow changing between BUSINESS_OWNER and MPP roles,
-    // you might need to add a separate role field or use userCategory
+    private String userPassword;
 }

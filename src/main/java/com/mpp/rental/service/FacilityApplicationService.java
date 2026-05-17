@@ -29,6 +29,7 @@ public class FacilityApplicationService {
     private final EventFacilityRepository eventFacilityRepository;
     private final BusinessRepository businessRepository;
     private final UserRepository userRepository;
+    private final NotificationService notificationService; // ← ADDED
 
     // ==================== BO EVENT BROWSING ====================
 
@@ -187,9 +188,103 @@ public class FacilityApplicationService {
             savedApplications.add(applicationRepository.save(application));
         }
 
+        // ── NOTIFICATION: notify MPP of the new application(s) ──────────────
+        // Use first application as reference (one submission = one notification)
+        if (!savedApplications.isEmpty()) {
+            FacilityApplication first = savedApplications.get(0);
+            Event event = first.getEventFacility().getEvent();
+            try {
+                notificationService.notifyApplicationSubmitted(
+                        first.getApplicationId().longValue(),
+                        business.getBusinessName(),
+                        event.getEventName()
+                );
+            } catch (Exception e) {
+                log.warn("Failed to send notification for application submission: {}", e.getMessage());
+            }
+        }
+        // ────────────────────────────────────────────────────────────────────
+
+
         return savedApplications.stream()
                 .map(app -> mapToApplicationResponse(app, null))
                 .collect(Collectors.toList());
+    }
+
+    /**
+     * Get all applications for the logged-in Business Owner
+     * GET /api/bo/applications
+     */
+    @Transactional(readOnly = true)
+    public List<FacilityApplicationResponse> getMyApplications() {
+        String email = SecurityContextHolder.getContext().getAuthentication().getName();
+        User user = userRepository.findByUserEmail(email)
+                .orElseThrow(() -> new ResourceNotFoundException("User not found"));
+
+        List<FacilityApplication> applications = applicationRepository.findAllByUserId(user.getUserId());
+
+        return applications.stream()
+                .map(app -> {
+                    Payment payment = paymentRepository
+                            .findByApplication_ApplicationId(app.getApplicationId())
+                            .orElse(null);
+                    return mapToApplicationResponse(app, payment);
+                })
+                .collect(Collectors.toList());
+    }
+
+    /**
+     * Cancel a PENDING application — sets status to CANCELLED
+     * DELETE /api/bo/applications/{id}/cancel
+     */
+    @Transactional
+    public void cancelApplication(Integer applicationId) {
+        String email = SecurityContextHolder.getContext().getAuthentication().getName();
+        User user = userRepository.findByUserEmail(email)
+                .orElseThrow(() -> new ResourceNotFoundException("User not found"));
+
+        FacilityApplication application = applicationRepository.findByIdWithDetails(applicationId)
+                .orElseThrow(() -> new ResourceNotFoundException("Application not found with ID: " + applicationId));
+
+        // Verify the application belongs to the current user
+        if (!application.getBusiness().getUser().getUserId().equals(user.getUserId())) {
+            throw new ApplicationException("You do not have permission to cancel this application");
+        }
+
+        // Only PENDING applications can be cancelled
+        if (application.getApplicationStatus() != FacilityApplication.ApplicationStatus.PENDING) {
+            throw new ApplicationException("Only PENDING applications can be cancelled");
+        }
+
+        application.setApplicationStatus(FacilityApplication.ApplicationStatus.CANCELLED);
+        applicationRepository.save(application);
+    }
+
+    /**
+     * Delete a REJECTED or CANCELLED application — hard delete from DB
+     * DELETE /api/bo/applications/{id}
+     */
+    @Transactional
+    public void deleteApplication(Integer applicationId) {
+        String email = SecurityContextHolder.getContext().getAuthentication().getName();
+        User user = userRepository.findByUserEmail(email)
+                .orElseThrow(() -> new ResourceNotFoundException("User not found"));
+
+        FacilityApplication application = applicationRepository.findByIdWithDetails(applicationId)
+                .orElseThrow(() -> new ResourceNotFoundException("Application not found with ID: " + applicationId));
+
+        // Verify the application belongs to the current user
+        if (!application.getBusiness().getUser().getUserId().equals(user.getUserId())) {
+            throw new ApplicationException("You do not have permission to delete this application");
+        }
+
+        // Only REJECTED or CANCELLED applications can be deleted
+        if (application.getApplicationStatus() != FacilityApplication.ApplicationStatus.REJECTED
+                && application.getApplicationStatus() != FacilityApplication.ApplicationStatus.CANCELLED) {
+            throw new ApplicationException("Only REJECTED or CANCELLED applications can be deleted");
+        }
+
+        applicationRepository.delete(application);
     }
 
     // ==================== HELPER MAPPERS ====================
@@ -221,11 +316,7 @@ public class FacilityApplicationService {
                 ? ef.getFacilityStudentPrice()
                 : ef.getFacilityNonStudentPrice();
 
-        // Calculate remaining quota across all user's businesses
-        // (take the minimum remaining across all businesses — worst case)
-        // Actually: show per-business info, frontend will handle per-business selection
-        // We compute remaining quota for the "most constrained" business (lowest remaining)
-        int minRemainingQuota = ef.getMaxPerBusiness(); // default if no businesses
+        int minRemainingQuota = ef.getMaxPerBusiness();
         boolean anyPending = false;
 
         for (Business b : userBusinesses) {

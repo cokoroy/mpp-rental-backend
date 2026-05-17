@@ -19,7 +19,16 @@ import java.io.IOException;
 
 /**
  * JwtAuthenticationFilter - Intercepts every HTTP request
- * Extracts JWT token from Authorization header and validates it
+ * Extracts JWT token from Authorization header and validates it.
+ *
+ * UPDATED: Also reads JWT from ?token= query parameter for SSE connections.
+ * Standard EventSource (browser) cannot send custom headers, so the frontend
+ * passes the token as a query param for the /notifications/stream endpoint.
+ *
+ * NOTE: request.getParameter() is intentionally skipped for multipart requests
+ * (e.g. ToyyibPay callback) because it triggers Tomcat's multipart parser which
+ * can throw FileCountLimitExceededException (413) before the request reaches
+ * the controller. Multipart endpoints never use JWT query params anyway.
  */
 @Component
 @RequiredArgsConstructor
@@ -35,50 +44,66 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             @NonNull FilterChain filterChain
     ) throws ServletException, IOException {
 
-        // 1. Get Authorization header
-        final String authHeader = request.getHeader("Authorization");
+        String jwt = null;
 
-        // 2. Check if header exists and starts with "Bearer "
-        if (authHeader == null || !authHeader.startsWith("Bearer ")) {
+        // 1. Try Authorization header first (standard approach)
+        final String authHeader = request.getHeader("Authorization");
+        if (authHeader != null && authHeader.startsWith("Bearer ")) {
+            jwt = authHeader.substring(7);
+        }
+
+        // 2. Fallback: read from ?token= query param (for SSE EventSource connections)
+        //    IMPORTANT: skip getParameter() for multipart/form-data requests.
+        //    Calling getParameter() on a multipart request forces Tomcat to parse
+        //    all parts, which triggers FileCountLimitExceededException (413) if
+        //    the number of form fields exceeds Tomcat's maxPartCount (default: 10).
+        //    ToyyibPay callback sends 12 multipart fields — this was causing 413.
+        if (jwt == null) {
+            String contentType = request.getContentType();
+            boolean isMultipart = contentType != null
+                    && contentType.toLowerCase().contains("multipart/form-data");
+
+            if (!isMultipart) {
+                // Safe to call getParameter() — not a multipart request
+                String tokenParam = request.getParameter("token");
+                if (tokenParam != null && !tokenParam.isEmpty()) {
+                    jwt = tokenParam;
+                }
+            }
+            // For multipart requests: no JWT query param support needed
+            // (ToyyibPay callback is permitAll() — no token required)
+        }
+
+        // 3. No token found — skip JWT processing, let security config decide
+        if (jwt == null) {
             filterChain.doFilter(request, response);
             return;
         }
 
-        // 3. Extract JWT token (remove "Bearer " prefix)
-        final String jwt = authHeader.substring(7);
-
         try {
-            // 4. Extract username (email) from token
+            // 4. Extract username from token
             final String userEmail = jwtUtil.extractUsername(jwt);
 
-            // 5. If email exists and user is not already authenticated
+            // 5. Validate token and set authentication if not already set
             if (userEmail != null && SecurityContextHolder.getContext().getAuthentication() == null) {
+                UserDetails userDetails = userDetailsService.loadUserByUsername(userEmail);
 
-                // 6. Load user details from database
-                UserDetails userDetails = this.userDetailsService.loadUserByUsername(userEmail);
-
-                // 7. Validate token
                 if (jwtUtil.validateToken(jwt, userDetails)) {
-
-                    // 8. Create authentication token
-                    UsernamePasswordAuthenticationToken authToken = new UsernamePasswordAuthenticationToken(
-                            userDetails,
-                            null,
-                            userDetails.getAuthorities()
-                    );
-
+                    UsernamePasswordAuthenticationToken authToken =
+                            new UsernamePasswordAuthenticationToken(
+                                    userDetails,
+                                    null,
+                                    userDetails.getAuthorities()
+                            );
                     authToken.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
-
-                    // 9. Set authentication in security context
                     SecurityContextHolder.getContext().setAuthentication(authToken);
                 }
             }
         } catch (Exception e) {
-            // Token is invalid - log and continue
-            logger.error("JWT token validation failed: " + e.getMessage());
+            // Invalid token — don't set authentication, request will fail at authorization
+            logger.warn("JWT validation failed: " + e.getMessage());
         }
 
-        // 10. Continue filter chain
         filterChain.doFilter(request, response);
     }
 }

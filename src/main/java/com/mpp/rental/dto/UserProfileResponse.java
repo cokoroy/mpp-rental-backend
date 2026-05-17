@@ -21,7 +21,13 @@ public class UserProfileResponse {
     private String userPhoneNumber;
     private UserCategory userCategory;
     private UserStatus userStatus;
-    private String userAddress;
+    // ── Split address fields ─────────────────────────────────────────────────
+    private String userAddressLine1;
+    private String userAddressLine2;
+    private String userCity;
+    private String userPostalCode;
+    private String userState;
+    // ─────────────────────────────────────────────────────────────────────────
     private LocalDateTime userRegisteredAt;
     private LocalDateTime userLastLogin;
     private Boolean emailVerified;

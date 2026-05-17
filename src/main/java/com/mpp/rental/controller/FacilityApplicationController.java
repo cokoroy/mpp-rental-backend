@@ -38,4 +38,55 @@ public class FacilityApplicationController {
                     .body(new ApiResponse<>(false, e.getMessage(), null));
         }
     }
+
+    /**
+     * Get all applications for the logged-in Business Owner
+     * GET /api/bo/applications
+     */
+    @GetMapping
+    public ResponseEntity<ApiResponse<List<FacilityApplicationResponse>>> getMyApplications() {
+        try {
+            List<FacilityApplicationResponse> responses = facilityApplicationService.getMyApplications();
+            return ResponseEntity.ok(new ApiResponse<>(true, "Applications retrieved successfully", responses));
+        } catch (Exception e) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(new ApiResponse<>(false, e.getMessage(), null));
+        }
+    }
+
+    /**
+     * Cancel a PENDING application (soft cancel — sets status to CANCELLED)
+     * DELETE /api/bo/applications/{id}/cancel
+     */
+    @DeleteMapping("/{id}/cancel")
+    public ResponseEntity<ApiResponse<Void>> cancelApplication(@PathVariable Integer id) {
+        try {
+            facilityApplicationService.cancelApplication(id);
+            return ResponseEntity.ok(new ApiResponse<>(true, "Application cancelled successfully", null));
+        } catch (ApplicationException e) {
+            return ResponseEntity.status(HttpStatus.CONFLICT)
+                    .body(new ApiResponse<>(false, e.getMessage(), null));
+        } catch (Exception e) {
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                    .body(new ApiResponse<>(false, e.getMessage(), null));
+        }
+    }
+
+    /**
+     * Delete a REJECTED or CANCELLED application (hard delete)
+     * DELETE /api/bo/applications/{id}
+     */
+    @DeleteMapping("/{id}")
+    public ResponseEntity<ApiResponse<Void>> deleteApplication(@PathVariable Integer id) {
+        try {
+            facilityApplicationService.deleteApplication(id);
+            return ResponseEntity.ok(new ApiResponse<>(true, "Application deleted successfully", null));
+        } catch (ApplicationException e) {
+            return ResponseEntity.status(HttpStatus.CONFLICT)
+                    .body(new ApiResponse<>(false, e.getMessage(), null));
+        } catch (Exception e) {
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                    .body(new ApiResponse<>(false, e.getMessage(), null));
+        }
+    }
 }

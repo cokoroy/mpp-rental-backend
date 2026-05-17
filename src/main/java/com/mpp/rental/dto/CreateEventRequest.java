@@ -24,9 +24,11 @@ public class CreateEventRequest {
     private String eventVenue;
 
     @NotNull(message = "Event start date is required")
+    @FutureOrPresent(message = "Event start date must be today or in the future")
     private LocalDate eventStartDate;
 
     @NotNull(message = "Event end date is required")
+    @FutureOrPresent(message = "Event end date must be today or in the future")
     private LocalDate eventEndDate;
 
     @NotNull(message = "Event start time is required")
@@ -36,14 +38,15 @@ public class CreateEventRequest {
     private LocalTime eventEndTime;
 
     @NotBlank(message = "Event type is required")
-    @Size(max = 100, message = "Event type must not exceed 100 characters")
+    @Size(max = 100, message = "Event type cannot exceed 100 characters")
     private String eventType;
 
+    // UPDATED: Removed minimum character requirement (was min = 10)
     @NotBlank(message = "Event description is required")
-    @Size(min = 10, max = 1000, message = "Event description must be between 10 and 1000 characters")
+    @Size(max = 1000, message = "Event description cannot exceed 1000 characters")
     private String eventDesc;
 
-    @NotEmpty(message = "At least one facility must be assigned to the event")
+    @NotEmpty(message = "At least one facility must be assigned")
     @Valid
     private List<AssignFacilityRequest> facilities;
 }

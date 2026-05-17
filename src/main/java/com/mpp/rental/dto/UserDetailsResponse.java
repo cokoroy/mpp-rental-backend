@@ -24,7 +24,13 @@ public class UserDetailsResponse {
     private String userName;
     private String userEmail;
     private String userPhoneNumber;
-    private String userAddress;
+    // ── Split address fields ─────────────────────────────────────────────────
+    private String userAddressLine1;
+    private String userAddressLine2;
+    private String userCity;
+    private String userPostalCode;
+    private String userState;
+    // ─────────────────────────────────────────────────────────────────────────
     private String userPassword; // Plain text password for MPP to view (will be shown as is)
 
     // User Category & Role

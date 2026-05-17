@@ -59,7 +59,7 @@ public class Event {
     private String eventType;
 
     @NotBlank(message = "Event description is required")
-    @Size(min = 10, max = 1000, message = "Event description must be between 10 and 1000 characters")
+    @Size(max = 1000, message = "Event description must be between 10 and 1000 characters")
     @Column(name = "eventDesc", nullable = false, length = 1000)
     private String eventDesc;
 

@@ -209,13 +209,17 @@ public class MPPFacilityApprovalService {
         }
 
         if (currentStatus == FacilityApplication.ApplicationStatus.APPROVED) {
-            // Delete UNPAID payment record if exists
             Optional<Payment> payment = paymentRepository.findByApplication_ApplicationId(applicationId);
+
+            if (payment.isPresent() && payment.get().getPaymentStatus() == Payment.PaymentStatus.PAID) {
+                throw new BadRequestException("Cannot revert this application — the business owner has already paid. Please handle the refund manually before reverting.");
+            }
+
+            // Delete UNPAID payment record if exists
             payment.ifPresent(p -> {
                 if (p.getPaymentStatus() == Payment.PaymentStatus.UNPAID) {
                     paymentRepository.delete(p);
                 }
-                // If PAID, don't delete — keep it but still revert status
             });
 
             // Restore quota

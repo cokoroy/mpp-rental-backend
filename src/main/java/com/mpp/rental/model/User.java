@@ -11,15 +11,11 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.List;
 
-/**
- * User Entity - Represents all users in the system
- * Includes: Business Owners (Student/Non-Student) and MPP administrators
- */
 @Entity
-@Table(name = "users") // 'user' is a reserved keyword in MySQL, so we use 'users'
-@Data // Lombok: Auto-generates getters, setters, toString, equals, hashCode
-@NoArgsConstructor // Lombok: Generates no-argument constructor
-@AllArgsConstructor // Lombok: Generates constructor with all fields
+@Table(name = "users")
+@Data
+@NoArgsConstructor
+@AllArgsConstructor
 public class User {
 
     @Id
@@ -37,51 +33,46 @@ public class User {
     private String userPhoneNumber;
 
     @Column(name = "user_password", nullable = false, length = 255)
-    private String userPassword; // Will be encrypted with BCrypt
+    private String userPassword;
 
     @OneToMany(mappedBy = "user", cascade = CascadeType.ALL, orphanRemoval = true)
     private List<Business> businesses;
 
-    /**
-     * User Category: MPP, STUDENT, NON_STUDENT
-     * We'll use ENUM for better type safety
-     */
     @Enumerated(EnumType.STRING)
     @Column(name = "user_category", nullable = false, length = 50)
     private UserCategory userCategory;
 
-    /**
-     * User Status: PENDING, ACTIVE, BLOCKED
-     * PENDING: New registrations waiting for MPP approval
-     * ACTIVE: Approved and can use the system
-     * BLOCKED: Blocked by MPP
-     */
     @Enumerated(EnumType.STRING)
     @Column(name = "user_status", nullable = false, length = 50)
-    private UserStatus userStatus = UserStatus.PENDING; // Default to PENDING
+    private UserStatus userStatus = UserStatus.PENDING;
 
-    @Column(name = "user_address", length = 500)
-    private String userAddress;
+    // ── Address fields (replaces the old single user_address column) ──────────
+    @Column(name = "user_address_line1", length = 255)
+    private String userAddressLine1;
 
-    @CreationTimestamp // Automatically sets timestamp when record is created
+    @Column(name = "user_address_line2", length = 255)
+    private String userAddressLine2;
+
+    @Column(name = "user_city", length = 100)
+    private String userCity;
+
+    @Column(name = "user_postal_code", length = 10)
+    private String userPostalCode;
+
+    @Column(name = "user_state", length = 100)
+    private String userState;
+    // ─────────────────────────────────────────────────────────────────────────
+
+    @CreationTimestamp
     @Column(name = "user_registered_at", nullable = false, updatable = false)
     private LocalDateTime userRegisteredAt;
 
     @Column(name = "user_last_login")
     private LocalDateTime userLastLogin;
 
-    /**
-     * One-to-One relationship with BankAccount
-     * mappedBy: tells JPA that BankAccount owns the relationship
-     * cascade: operations on User will cascade to BankAccount
-     * orphanRemoval: if BankAccount is removed from User, delete it
-     */
     @OneToOne(mappedBy = "user", cascade = CascadeType.ALL, orphanRemoval = true)
     private BankAccount bankAccount;
 
-    /**
-     * Email verification fields (for future implementation)
-     */
     @Column(name = "email_verified", nullable = false)
     private Boolean emailVerified = false;
 
@@ -91,17 +82,16 @@ public class User {
     @Column(name = "verification_token_expiry")
     private LocalDateTime verificationTokenExpiry;
 
-    // Enum for User Category
     public enum UserCategory {
         MPP,
         STUDENT,
-        NON_STUDENT
+        NON_STUDENT,
+        SUPER_ADMIN
     }
 
-    // Enum for User Status
     public enum UserStatus {
-        PENDING,  // Waiting for approval
-        ACTIVE,   // Approved and active
-        BLOCKED   // Blocked by admin
+        PENDING,
+        ACTIVE,
+        BLOCKED
     }
 }

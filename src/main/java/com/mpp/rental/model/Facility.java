@@ -47,7 +47,7 @@ public class Facility {
     private String facilityDesc;
 
     @NotBlank(message = "Usage information is required")
-    @Size(min = 5, max = 500, message = "Usage information must be between 5 and 500 characters")
+    @Size( max = 500, message = "Usage information must be between 5 and 500 characters")
     @Column(name = "facility_usage ", nullable = false, length = 500)
     private String facility_usage ;
 

@@ -80,4 +80,45 @@ public interface UserRepository extends JpaRepository<User, Long> {
             "LEFT JOIN FETCH u.bankAccount " +
             "WHERE u.userId = :userId")
     Optional<User> findByIdWithBusinessesAndBankAccount(@Param("userId") Long userId);
+
+    // ==================== NOTIFICATION QUERY METHODS ====================
+
+    /**
+     * Lightweight userId lookup for SSE stream endpoint.
+     *
+     * Uses a native SQL query (not JPQL) so JPA does NOT load the full User entity
+     * or keep an EntityManager open. The DB connection is acquired and released
+     * immediately — it does NOT leak into the SSE async thread lifetime.
+     *
+     * This is the ONLY safe way to look up a user inside the SSE stream() endpoint.
+     * Never use findByUserEmail() there — it opens a JPA EntityManager that holds
+     * a HikariCP connection for the entire SSE connection lifetime, exhausting the pool.
+     */
+    @Query(value = "SELECT user_id FROM users WHERE user_email = :email", nativeQuery = true)
+    Optional<Long> findUserIdByEmail(@Param("email") String email);
+
+    /**
+     * Get all MPP user IDs — used to notify MPP of BO actions
+     */
+    @Query("SELECT u.userId FROM User u WHERE u.userCategory = 'MPP' AND u.userStatus = 'ACTIVE'")
+    List<Long> findMPPUserIds();
+
+    /**
+     * Get all active Business Owner user IDs (STUDENT + NON_STUDENT)
+     * Used to notify all BOs when a new event is created or announcement sent
+     */
+    @Query("SELECT u.userId FROM User u WHERE u.userCategory IN ('STUDENT', 'NON_STUDENT') AND u.userStatus = 'ACTIVE'")
+    List<Long> findBusinessOwnerUserIds();
+
+    /**
+     * Get all active STUDENT user IDs — for targeted announcements
+     */
+    @Query("SELECT u.userId FROM User u WHERE u.userCategory = 'STUDENT' AND u.userStatus = 'ACTIVE'")
+    List<Long> findStudentUserIds();
+
+    /**
+     * Get all active NON_STUDENT user IDs — for targeted announcements
+     */
+    @Query("SELECT u.userId FROM User u WHERE u.userCategory = 'NON_STUDENT' AND u.userStatus = 'ACTIVE'")
+    List<Long> findNonStudentUserIds();
 }

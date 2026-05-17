@@ -6,10 +6,6 @@ import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
-/**
- * RegisterRequest DTO - Used for user registration
- * Contains validation annotations to ensure data quality
- */
 @Data
 @NoArgsConstructor
 @AllArgsConstructor
@@ -40,10 +36,29 @@ public class RegisterRequest {
     private String confirmPassword;
 
     @NotNull(message = "User category is required")
+    // Only STUDENT and NON_STUDENT allowed — MPP/SUPER_ADMIN blocked in UserService
     private UserCategory userCategory;
 
-    @Size(max = 500, message = "Address must not exceed 500 characters")
-    private String userAddress;
+    // ── Split address fields ──────────────────────────────────────────────────
+    @NotBlank(message = "Address line 1 is required")
+    @Size(max = 255, message = "Address line 1 must not exceed 255 characters")
+    private String userAddressLine1;
+
+    @Size(max = 255, message = "Address line 2 must not exceed 255 characters")
+    private String userAddressLine2;
+
+    @NotBlank(message = "City is required")
+    @Size(max = 100, message = "City must not exceed 100 characters")
+    private String userCity;
+
+    @NotBlank(message = "Postal code is required")
+    @Pattern(regexp = "^[0-9]{5}$", message = "Postal code must be 5 digits")
+    private String userPostalCode;
+
+    @NotBlank(message = "State is required")
+    @Size(max = 100, message = "State must not exceed 100 characters")
+    private String userState;
+    // ─────────────────────────────────────────────────────────────────────────
 
     // Bank Account Information
     @NotBlank(message = "Bank name is required")

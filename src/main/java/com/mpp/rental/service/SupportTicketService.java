@@ -1,6 +1,7 @@
 package com.mpp.rental.service;
 
 import com.mpp.rental.dto.*;
+import java.time.LocalDateTime;
 import com.mpp.rental.exception.BadRequestException;
 import com.mpp.rental.exception.ResourceNotFoundException;
 import com.mpp.rental.exception.SupportTicketException;
@@ -12,6 +13,7 @@ import com.mpp.rental.repository.TicketResponseRepository;
 import com.mpp.rental.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -27,6 +29,8 @@ public class SupportTicketService {
     private final SupportTicketRepository supportTicketRepository;
     private final TicketResponseRepository ticketResponseRepository;
     private final UserRepository userRepository;
+    private final SimpMessagingTemplate messagingTemplate;
+    private final NotificationService notificationService; // ← ADDED
 
     // ==================== HELPER ====================
 
@@ -34,6 +38,17 @@ public class SupportTicketService {
         String email = SecurityContextHolder.getContext().getAuthentication().getName();
         return userRepository.findByUserEmail(email)
                 .orElseThrow(() -> new ResourceNotFoundException("User not found"));
+    }
+
+    /**
+     * Broadcast ticket update to all WebSocket subscribers of this ticket
+     * Topic: /topic/ticket/{ticketId}
+     */
+    private void broadcastTicketUpdate(Integer ticketId, String eventType, SupportTicketResponse ticket) {
+        String destination = "/topic/ticket/" + ticketId;
+        TicketUpdateEvent event = new TicketUpdateEvent(eventType, ticket);
+        messagingTemplate.convertAndSend(destination, event);
+        log.info("WebSocket broadcast: eventType={} ticketId={}", eventType, ticketId);
     }
 
     // ==================== BUSINESS OWNER - TICKET CRUD ====================
@@ -45,7 +60,6 @@ public class SupportTicketService {
     public SupportTicketResponse createTicket(CreateTicketRequest request) {
         User user = getCurrentUser();
 
-        // Parse and validate category
         SupportTicket.TicketCategory category;
         try {
             category = SupportTicket.TicketCategory.valueOf(request.getTicketCategory().toUpperCase());
@@ -53,7 +67,6 @@ public class SupportTicketService {
             throw new BadRequestException("Invalid ticket category: " + request.getTicketCategory());
         }
 
-        // Parse and validate priority
         SupportTicket.TicketPriority priority;
         try {
             priority = SupportTicket.TicketPriority.valueOf(request.getTicketPriority().toUpperCase());
@@ -72,11 +85,23 @@ public class SupportTicketService {
         SupportTicket saved = supportTicketRepository.save(ticket);
         log.info("Support ticket created: ticketId={} by userId={}", saved.getTicketId(), user.getUserId());
 
+        // ── NOTIFICATION: Notify MPP of new support ticket ──────────────────
+        try {
+            notificationService.notifySupportTicketCreated(
+                    saved.getTicketId().longValue(),
+                    user.getUserName(),
+                    saved.getTicketTitle()
+            );
+        } catch (Exception e) {
+            log.warn("Failed to send support ticket notification: {}", e.getMessage());
+        }
+        // ────────────────────────────────────────────────────────────────────
+
         return mapToResponse(saved, null);
     }
 
     /**
-     * Get all tickets submitted by the current Business Owner (list view - no responses)
+     * Get all tickets submitted by the current Business Owner (list view)
      */
     @Transactional(readOnly = true)
     public List<SupportTicketResponse> getMyTickets() {
@@ -104,6 +129,7 @@ public class SupportTicketService {
     /**
      * Business Owner replies to an existing ticket
      * Only allowed if ticket is OPEN or IN_PROGRESS
+     * Broadcasts NEW_REPLY event over WebSocket
      */
     @Transactional
     public SupportTicketResponse replyToTicket(Integer ticketId, CreateTicketResponseRequest request) {
@@ -112,7 +138,6 @@ public class SupportTicketService {
         SupportTicket ticket = supportTicketRepository.findByTicketIdAndUserId(ticketId, user.getUserId())
                 .orElseThrow(() -> new ResourceNotFoundException("Ticket not found with ID: " + ticketId));
 
-        // Cannot reply to a RESOLVED ticket
         if (ticket.getTicketStatus() == SupportTicket.TicketStatus.RESOLVED) {
             throw new SupportTicketException("Cannot reply to a resolved ticket");
         }
@@ -121,12 +146,29 @@ public class SupportTicketService {
         response.setSupportTicket(ticket);
         response.setSender(user);
         response.setMessage(request.getMessage());
-
         ticketResponseRepository.save(response);
+
         log.info("BO replied to ticketId={} by userId={}", ticketId, user.getUserId());
 
         List<TicketResponse> responses = ticketResponseRepository.findAllByTicketId(ticketId);
-        return mapToResponse(ticket, responses);
+        SupportTicketResponse updatedTicket = mapToResponse(ticket, responses);
+
+        // Broadcast to MPP and BO both viewing this ticket
+        broadcastTicketUpdate(ticketId, "NEW_REPLY", updatedTicket);
+
+        // ── NOTIFICATION: Notify MPP that BO replied ─────────────────────────
+        try {
+            notificationService.notifySupportTicketBoReplied(
+                    ticketId.longValue(),
+                    user.getUserName(),
+                    ticket.getTicketTitle()
+            );
+        } catch (Exception e) {
+            log.warn("Failed to send BO reply notification: {}", e.getMessage());
+        }
+        // ────────────────────────────────────────────────────────────────────
+
+        return updatedTicket;
     }
 
     /**
@@ -139,7 +181,6 @@ public class SupportTicketService {
         SupportTicket ticket = supportTicketRepository.findByTicketIdAndUserId(ticketId, user.getUserId())
                 .orElseThrow(() -> new ResourceNotFoundException("Ticket not found with ID: " + ticketId));
 
-        // Only OPEN tickets can be deleted (once MPP replies, status becomes IN_PROGRESS)
         if (ticket.getTicketStatus() != SupportTicket.TicketStatus.OPEN) {
             throw new SupportTicketException("Ticket can only be deleted when status is OPEN");
         }
@@ -180,7 +221,9 @@ public class SupportTicketService {
     }
 
     /**
-     * MPP replies to a ticket — automatically moves status from OPEN to IN_PROGRESS
+     * MPP replies to a ticket
+     * Auto-transitions OPEN → IN_PROGRESS
+     * Broadcasts NEW_REPLY event over WebSocket
      */
     @Transactional
     public SupportTicketResponse mppReplyToTicket(Integer ticketId, CreateTicketResponseRequest request) {
@@ -189,7 +232,6 @@ public class SupportTicketService {
         SupportTicket ticket = supportTicketRepository.findByIdWithResponses(ticketId)
                 .orElseThrow(() -> new ResourceNotFoundException("Ticket not found with ID: " + ticketId));
 
-        // Cannot reply to RESOLVED ticket
         if (ticket.getTicketStatus() == SupportTicket.TicketStatus.RESOLVED) {
             throw new SupportTicketException("Cannot reply to a resolved ticket");
         }
@@ -204,16 +246,35 @@ public class SupportTicketService {
         response.setSupportTicket(ticket);
         response.setSender(mpp);
         response.setMessage(request.getMessage());
-
         ticketResponseRepository.save(response);
+
         log.info("MPP replied to ticketId={} by userId={}", ticketId, mpp.getUserId());
 
         List<TicketResponse> responses = ticketResponseRepository.findAllByTicketId(ticketId);
-        return mapToResponse(ticket, responses);
+        SupportTicketResponse updatedTicket = mapToResponse(ticket, responses);
+
+        // Broadcast to BO and MPP both viewing this ticket
+        broadcastTicketUpdate(ticketId, "NEW_REPLY", updatedTicket);
+
+        // ── NOTIFICATION: Notify BO that MPP replied ─────────────────────────
+        try {
+            Long boUserId = ticket.getUser().getUserId();
+            notificationService.notifySupportTicketReplied(
+                    ticketId.longValue(),
+                    boUserId,
+                    ticket.getTicketTitle()
+            );
+        } catch (Exception e) {
+            log.warn("Failed to send MPP reply notification to BO: {}", e.getMessage());
+        }
+        // ────────────────────────────────────────────────────────────────────
+
+        return updatedTicket;
     }
 
     /**
      * MPP marks ticket as RESOLVED
+     * Broadcasts STATUS_CHANGE event over WebSocket
      */
     @Transactional
     public SupportTicketResponse resolveTicket(Integer ticketId) {
@@ -229,11 +290,16 @@ public class SupportTicketService {
         log.info("Ticket resolved: ticketId={}", ticketId);
 
         List<TicketResponse> responses = ticketResponseRepository.findAllByTicketId(ticketId);
-        return mapToResponse(ticket, responses);
+        SupportTicketResponse updatedTicket = mapToResponse(ticket, responses);
+
+        broadcastTicketUpdate(ticketId, "STATUS_CHANGE", updatedTicket);
+
+        return updatedTicket;
     }
 
     /**
      * MPP reopens a RESOLVED ticket → back to IN_PROGRESS
+     * Broadcasts STATUS_CHANGE event over WebSocket
      */
     @Transactional
     public SupportTicketResponse reopenTicket(Integer ticketId) {
@@ -249,11 +315,16 @@ public class SupportTicketService {
         log.info("Ticket reopened: ticketId={}", ticketId);
 
         List<TicketResponse> responses = ticketResponseRepository.findAllByTicketId(ticketId);
-        return mapToResponse(ticket, responses);
+        SupportTicketResponse updatedTicket = mapToResponse(ticket, responses);
+
+        broadcastTicketUpdate(ticketId, "STATUS_CHANGE", updatedTicket);
+
+        return updatedTicket;
     }
 
     /**
      * MPP updates ticket priority
+     * Broadcasts PRIORITY_CHANGE event over WebSocket
      */
     @Transactional
     public SupportTicketResponse updateTicketPriority(Integer ticketId, UpdateTicketPriorityRequest request) {
@@ -270,6 +341,45 @@ public class SupportTicketService {
         ticket.setTicketPriority(priority);
         supportTicketRepository.save(ticket);
         log.info("Ticket priority updated: ticketId={} priority={}", ticketId, priority);
+
+        List<TicketResponse> responses = ticketResponseRepository.findAllByTicketId(ticketId);
+        SupportTicketResponse updatedTicket = mapToResponse(ticket, responses);
+
+        broadcastTicketUpdate(ticketId, "PRIORITY_CHANGE", updatedTicket);
+
+        return updatedTicket;
+    }
+
+
+    // ==================== FEEDBACK ====================
+
+    /**
+     * Business Owner submits feedback on a RESOLVED ticket
+     * Only allowed once — cannot resubmit if feedbackRating already set
+     */
+    @Transactional
+    public SupportTicketResponse submitFeedback(Integer ticketId, SubmitFeedbackRequest request) {
+        User user = getCurrentUser();
+
+        SupportTicket ticket = supportTicketRepository.findByTicketIdAndUserId(ticketId, user.getUserId())
+                .orElseThrow(() -> new ResourceNotFoundException("Ticket not found with ID: " + ticketId));
+
+        // Only RESOLVED tickets can receive feedback
+        if (ticket.getTicketStatus() != SupportTicket.TicketStatus.RESOLVED) {
+            throw new SupportTicketException("Feedback can only be submitted on resolved tickets");
+        }
+
+        // Only allow feedback once
+        if (ticket.getFeedbackRating() != null) {
+            throw new SupportTicketException("Feedback has already been submitted for this ticket");
+        }
+
+        ticket.setFeedbackRating(request.getFeedbackRating());
+        ticket.setFeedbackComment(request.getFeedbackComment());
+        ticket.setFeedbackSubmittedAt(LocalDateTime.now());
+        supportTicketRepository.save(ticket);
+
+        log.info("Feedback submitted: ticketId={} rating={}", ticketId, request.getFeedbackRating());
 
         List<TicketResponse> responses = ticketResponseRepository.findAllByTicketId(ticketId);
         return mapToResponse(ticket, responses);
@@ -289,6 +399,9 @@ public class SupportTicketService {
         response.setTicketCategory(ticket.getTicketCategory().name());
         response.setTicketPriority(ticket.getTicketPriority().name());
         response.setTicketStatus(ticket.getTicketStatus().name());
+        response.setFeedbackRating(ticket.getFeedbackRating());
+        response.setFeedbackComment(ticket.getFeedbackComment());
+        response.setFeedbackSubmittedAt(ticket.getFeedbackSubmittedAt());
         response.setCreatedAt(ticket.getCreatedAt());
         response.setUpdatedAt(ticket.getUpdatedAt());
 
